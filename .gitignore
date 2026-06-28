@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# Never commit model weights
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+*.part
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,1 @@
+{"_class_name": "SingleStreamDiT", "features": 6144, "layers": 28, "heads": 48, "kvheads": 12, "txtdim": 2560, "txtlayers": 12, "patch": 2, "channels": 16}

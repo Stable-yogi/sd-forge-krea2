@@ -1,0 +1,5 @@
+# sd-forge-krea2 runtime dependencies.
+# All of these already ship with Forge Neo — listed for completeness.
+requests
+# Provided by Forge Neo (do not need separate install):
+#   torch, gradio, safetensors, huggingface_guess
