@@ -66,14 +66,57 @@ def _dest_dirs(kind):
     return target, [d for d in scan if d]
 
 
+def _st_keys(path):
+    """safetensors tensor names (header only). Empty set on failure."""
+    try:
+        if not str(path).lower().endswith((".safetensors", ".sft")):
+            return set()
+        import json
+        import struct
+        with open(path, "rb") as f:
+            n = struct.unpack("<Q", f.read(8))[0]
+            h = json.loads(f.read(n))
+        h.pop("__metadata__", None)
+        return set(h.keys())
+    except Exception:
+        return set()
+
+
+def _classify(kind, keys):
+    """Identify a Krea2 component by its keys (so renamed files still count as present)."""
+    if kind == "te":
+        return (any(("self_attn.q_norm" in k and "layers." in k and "visual" not in k) for k in keys)
+                and any("embed_tokens" in k for k in keys))
+    if kind == "vae":
+        return (any(k.startswith("decoder.") for k in keys)
+                and any(("downsamples" in k or "upsamples" in k) for k in keys)
+                and not any("visual" in k for k in keys))
+    if kind == "ckpt":  # krea2 DiT fingerprint
+        return any(("blocks.0.mod.lin" in k or "txtfusion.projector" in k) for k in keys)
+    return False
+
+
 def _present(kw, kind):
     _, scan = _dest_dirs(kind)
+    # 1. fast filename-keyword match
     for d in scan:
         try:
             for n in os.listdir(d):
                 low = n.lower()
                 if low.endswith(_EXTS) and any(k in low for k in kw):
                     return os.path.join(d, n)
+        except Exception:
+            continue
+    # 2. content fallback — detect RENAMED files by their keys (cap per dir to stay fast)
+    for d in scan:
+        try:
+            files = [n for n in os.listdir(d) if n.lower().endswith((".safetensors", ".sft"))]
+            if len(files) > 80:           # don't header-scan a huge checkpoint dir
+                continue
+            for n in files:
+                p = os.path.join(d, n)
+                if _classify(kind, _st_keys(p)):
+                    return p
         except Exception:
             continue
     return None

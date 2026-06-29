@@ -35,6 +35,55 @@ KREA2_HIDDEN_OPTS = {
 }
 
 
+def _st_header_keys(path):
+    """Read a safetensors file's tensor names (header only — cheap). Empty set on failure."""
+    try:
+        if not str(path).lower().endswith((".safetensors", ".sft")):
+            return set()
+        import json
+        import struct
+        with open(path, "rb") as f:
+            n = struct.unpack("<Q", f.read(8))[0]
+            h = json.loads(f.read(n))
+        h.pop("__metadata__", None)
+        return set(h.keys())
+    except Exception:
+        return set()
+
+
+def _is_qwen3_te(keys):
+    return (any(("self_attn.q_norm" in k and "layers." in k and "visual" not in k) for k in keys)
+            and any("embed_tokens" in k for k in keys))
+
+
+def _is_qwen_vae(keys):
+    return (any(k.startswith("decoder.") for k in keys) and any(k.startswith("encoder.") for k in keys)
+            and any(("downsamples" in k or "upsamples" in k) for k in keys)
+            and not any("visual" in k for k in keys))
+
+
+def _content_scan(dirs, classifier, prefer=()):
+    """Fallback when filenames don't match (user renamed files): identify the right module by its
+    safetensors keys instead of its name. Only runs when the keyword scan found nothing."""
+    cands = []
+    for d in dirs:
+        try:
+            for n in os.listdir(d):
+                if n.lower().endswith((".safetensors", ".sft")):
+                    p = os.path.join(d, n)
+                    if classifier(_st_header_keys(p)):
+                        cands.append(p)
+        except Exception:
+            continue
+    if not cands:
+        return None
+    for pk in prefer:
+        for c in cands:
+            if pk in os.path.basename(c).lower():
+                return c
+    return cands[0]
+
+
 def _find_krea2_modules():
     """Auto-locate the Qwen3-VL TE (bf16 preferred) + Qwen-Image VAE from Forge's module dirs:
     models/text_encoder + models/VAE plus any --text-encoder-dirs/--vae-dirs. Dir-scanning so it
@@ -71,7 +120,11 @@ def _find_krea2_modules():
         return cands[0]
 
     te = scan(te_dirs, any_kw=("qwen3vl", "qwen3_vl", "qwen3-vl"), prefer=("bf16",))   # bf16 default
+    if te is None:                                  # renamed file? fall back to key-based detection
+        te = _content_scan(te_dirs, _is_qwen3_te, prefer=("bf16",))
     vae = scan(vae_dirs, all_kw=("vae",), any_kw=("qwen",), prefer=("qwen_image_vae",), avoid=("clear",))
+    if vae is None:
+        vae = _content_scan(vae_dirs, _is_qwen_vae)
     return [m for m in (te, vae) if m]
 
 
@@ -98,10 +151,10 @@ def _patch_preset_auto_modules():
 
 def _register_preset():
     """Add a 'krea2' entry to the UI Preset dropdown + its default sampler/steps/cfg + auto VAE/TE.
-    Pure runtime patch (no core edit): on_preset_change reads getattr(opts, f'{preset}_*')
-    dynamically and PresetArch.choices() feeds the dropdown, so this is upgrade-safe."""
-    from modules import shared
-    from modules.options import OptionInfo
+    Resilient by design: the dropdown entry is added FIRST with the fewest possible dependencies,
+    so a later (Forge-version-specific) failure can never hide the preset. This is the fix for the
+    'krea2 preset missing from the UI preset' reports."""
+    # 1. Add 'krea2' to the dropdown — minimal deps. MUST succeed even if step 2/3 fail.
     import modules_forge.presets as P
 
     if getattr(P.PresetArch.choices, "_krea2", False) is False:
@@ -116,20 +169,31 @@ def _register_preset():
         _choices._krea2 = True
         P.PresetArch.choices = staticmethod(_choices)
 
-    # hidden opts -> register in data_labels so opts.set() doesn't KeyError
-    for k, default in KREA2_HIDDEN_OPTS.items():
-        if k not in shared.opts.data_labels:
-            oi = OptionInfo(default)
-            oi.section = (None, "Forge Hidden Options")
-            shared.opts.data_labels[k] = oi
-        shared.opts.data.setdefault(k, default)
+    # 2. Per-preset options (sampler/steps/cfg + hidden checkpoint/modules opts). Wrapped so a
+    #    version difference (e.g. the OptionInfo import path) can't prevent the dropdown entry.
+    try:
+        from modules import shared
+        try:
+            from modules.options import OptionInfo
+        except Exception:
+            from modules.shared import OptionInfo  # older Forge layout
+        for k, default in KREA2_HIDDEN_OPTS.items():
+            if k not in shared.opts.data_labels:
+                oi = OptionInfo(default)
+                oi.section = (None, "Forge Hidden Options")
+                shared.opts.data_labels[k] = oi
+            shared.opts.data.setdefault(k, default)
+        for k, v in KREA2_PRESET_DEFAULTS.items():
+            shared.opts.data.setdefault(k, v)
+    except Exception:
+        print("[krea2] preset OPTS step skipped (the 'krea2' dropdown entry was still added):\n"
+              + traceback.format_exc())
 
-    # read-only sampling defaults -> data inject is enough
-    for k, v in KREA2_PRESET_DEFAULTS.items():
-        shared.opts.data.setdefault(k, v)
-
-    # selecting the krea2 preset auto-picks the Qwen3-VL TE + Qwen-Image VAE
-    _patch_preset_auto_modules()
+    # 3. Auto-pick TE+VAE when the preset is selected (non-critical).
+    try:
+        _patch_preset_auto_modules()
+    except Exception:
+        pass
 
 
 def _register():
@@ -240,11 +304,8 @@ def _register():
         _patched_replace._krea2 = True
         loader.replace_state_dict = _patched_replace
 
-    # --- 6. UI preset 'krea2' (Euler / Simple / 28 steps / CFG 4.5) ---
-    try:
-        _register_preset()
-    except Exception:
-        print("[krea2] preset registration skipped:\n" + traceback.format_exc())
+    # --- 6. UI preset 'krea2' is registered INDEPENDENTLY at the module bottom, so it appears in
+    #        the dropdown even if an earlier arch step hits a Forge-version snag. ---
 
     # --- 7. SEAMLESS PIECES: a bare krea2 DiT auto-loads its TE+VAE, so loading "pieces"
     #        works exactly like the full bake with no manual module-picking. Both streams
@@ -299,4 +360,11 @@ def _register():
 try:
     _register()
 except Exception:
-    print("[krea2] registration FAILED (Forge boot unaffected):\n" + traceback.format_exc())
+    print("[krea2] arch registration FAILED (Forge boot unaffected):\n" + traceback.format_exc())
+
+# Register the UI preset INDEPENDENTLY of the arch registration above — it's a pure UI convenience
+# and should show in the dropdown even if the arch step hit a version-specific snag. Idempotent.
+try:
+    _register_preset()
+except Exception:
+    print("[krea2] preset registration skipped:\n" + traceback.format_exc())
