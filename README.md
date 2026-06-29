@@ -72,6 +72,9 @@ All files are in the public HF repo **[Comfy-Org/Krea-2](https://huggingface.co/
 - **Washed-out / doubled / garbled images** → wrong settings. Use **Euler + Simple**, Clip skip **1**, discard-penultimate-sigma **off**, and a prose prompt. The `krea2` preset sets these for you.
 - **TE/VAE dropdown empty** → put the files in `models/text_encoder` + `models/VAE`, then hit the 🔄 refresh next to the dropdown.
 
+## 💬 Help & Support
+Questions, bugs, or want to show off your results? **Bring your issues to the Stable Yogi community → [stableyogi.com](https://stableyogi.com)** — that's where we help, share presets, and post guides.
+
 ## 📜 Credits & License
 - DiT implementation ported from **ComfyUI** (`comfy/ldm/krea2`) — therefore this extension is **GPL-3.0**.
 - Model weights: **Krea 2 Community License** (download from Comfy-Org/Krea-2; not redistributed here).
