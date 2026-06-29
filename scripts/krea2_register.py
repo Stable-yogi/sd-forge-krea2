@@ -226,8 +226,12 @@ def _register():
     _orig_replace = loader.replace_state_dict
 
     def _patched_replace(sd, asd, guess, path):
-        if any(k.startswith("model.language_model.") for k in asd):
-            asd = {k.replace("model.language_model.", "model.", 1): v
+        # Qwen3-VL TE files ship an unused vision tower (model.visual.*) that otherwise rides into
+        # the Qwen3 text-encoder load as "Unexpected" keys (wasted VRAM + a noisy log). Strip it.
+        # The bf16 variant nests the LM under model.language_model.* (flatten that); the fp8 variant
+        # is already flat (model.layers.*) — so strip visual INDEPENDENTLY of the rename.
+        if any(k.startswith(("model.visual.", "visual.", "model.language_model.")) for k in asd):
+            asd = {(k.replace("model.language_model.", "model.", 1) if k.startswith("model.language_model.") else k): v
                    for k, v in asd.items()
                    if not (k.startswith("model.visual.") or k.startswith("visual."))}
         return _orig_replace(sd, asd, guess, path)
