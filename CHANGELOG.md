@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.1.0 — 2026-06-29
+- **New: Detail Boost** (opt-in accordion in txt2img, off by default). Rebalances Krea 2's
+  12-layer Qwen3-VL conditioning toward the deep fine-detail taps (identity/texture) with
+  RMS-safe renormalisation, so the overall conditioning magnitude stays constant — sharper
+  results without oversaturation. Presets: balanced / detail / subtle + strength slider.
+  Technique credit: huwhitememes/comfyui-krea2-conditioning (Apache-2.0), fork of
+  nova452/ComfyUI-ConditioningKrea2Rebalance.
+- The full **Enhancement Suite** (Prompt-Adherence engine + custom per-layer control) is
+  available free at stableyogi.com.
+
 ## v1.0.1 — 2026-06-29 (community-feedback fixes)
 - **Fixed: `krea2` UI preset missing from the dropdown.** The preset now registers **resiliently and independently** of the architecture registration — the dropdown entry is added first, with the fewest possible dependencies, so it appears even on Forge Neo versions where a later step hit a version-specific snag.
 - **Fixed: renamed VAE / text-encoder / checkpoint files not detected** ("extension asks for download only with proper name"). Files are now identified by their **safetensors keys (content)**, not just the filename — rename them however you like and the extension still finds and auto-loads them.

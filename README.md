@@ -27,6 +27,10 @@ Two variants: **RAW** (base, best quality) and **Turbo** (8-step distilled, fast
 - **fp8 supported** for the DiT and the text encoder (half the size/VRAM).
 - **One-click model downloader** — the **"Krea 2"** tab fetches every file into the right folder.
 - **`krea2` UI preset** — auto-sets sampler/steps/CFG **and** auto-selects the TE + VAE.
+- **Detail Boost** (opt-in) — rebalances the 12-layer text conditioning toward the deep,
+  fine-detail taps with RMS-safe renormalisation: sharper identity/texture, no oversaturation.
+  *Want more? The full **Enhancement Suite** (advanced Prompt-Adherence engine + custom
+  per-layer control) is **free at [stableyogi.com](https://stableyogi.com)**.*
 
 ## ✅ Requirements
 - **Forge Neo** (Haoming02/sd-webui-forge-classic, `neo` branch). Tested on `neo-2.23`.

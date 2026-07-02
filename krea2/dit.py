@@ -26,6 +26,8 @@ from backend.attention import attention_function
 from backend.nn.flux import EmbedND, timestep_embedding, apply_rope
 from backend.utils import pad_to_patch_size
 
+from . import enhance
+
 
 class RMSNorm(nn.Module):
     """RMSNorm with the reference (1 + scale) weight convention (scale stored zero-centered)."""
@@ -243,6 +245,7 @@ class SingleStreamDiT(nn.Module):
         h_, w_ = H // patch, W // patch
 
         context = self._unpack_context(context)
+        context = enhance.maybe_detail_boost(context)   # no-op unless Detail Boost is enabled
 
         img = rearrange(x, "b c (h ph) (w pw) -> b (h w) (c ph pw)", ph=patch, pw=patch)
         img = self.first(img)
