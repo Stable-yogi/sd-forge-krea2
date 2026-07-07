@@ -30,7 +30,9 @@ Two variants: **RAW** (base, best quality) and **Turbo** (8-step distilled, fast
 - **Detail Boost** (opt-in) — rebalances the 12-layer text conditioning toward the deep,
   fine-detail taps with RMS-safe renormalisation: sharper identity/texture, no oversaturation.
   *Want more? The full **Enhancement Suite** (advanced Prompt-Adherence engine + custom
-  per-layer control) is **free at [stableyogi.com](https://stableyogi.com)**.*
+  per-layer control) is **free** →
+  [Stable-yogi/sd-forge-krea2-enhancements](https://github.com/Stable-yogi/sd-forge-krea2-enhancements)
+  (by [stableyogi.com](https://stableyogi.com)).*
 
 ## ✅ Requirements
 - **Forge Neo** (Haoming02/sd-webui-forge-classic, `neo` branch). Tested on `neo-2.23`.
