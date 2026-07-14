@@ -55,8 +55,13 @@ def _dest_dirs(kind):
     root = _models_root()
     co = getattr(shared, "cmd_opts", None)
     if kind == "ckpt":
-        target = os.path.join(root, "Stablediffusion")
-        scan = [target] + list(getattr(co, "ckpt_dirs", []) or [])
+        # Forge's real checkpoint folder is "Stable-diffusion" (WITH the dash — see Forge core
+        # modules/sd_models.py). Download where Forge actually scans: the first --ckpt-dirs if set,
+        # else models/Stable-diffusion. (The old "Stablediffusion" put files where Forge never looks.)
+        ckpt_dirs = list(getattr(co, "ckpt_dirs", []) or [])
+        default = os.path.join(root, "Stable-diffusion")
+        target = ckpt_dirs[0] if ckpt_dirs else default
+        scan = [default] + ckpt_dirs
     elif kind == "te":
         target = os.path.join(root, "text_encoder")
         scan = [target] + list(getattr(co, "text_encoder_dirs", []) or [])
@@ -151,13 +156,14 @@ def _download(url, dest_path, progress):
     headers = {"Range": f"bytes={resume}-"} if resume else {}
     name = os.path.basename(dest_path)
     with requests.get(url, stream=True, headers=headers, timeout=120) as r:
-        if r.status_code in (200, 206):
-            pass
-        else:
+        if r.status_code not in (200, 206):
             r.raise_for_status()
+        resumed = (r.status_code == 206)            # server actually honored the Range request
+        if not resumed:                             # full body (Range ignored, or fresh) -> start over,
+            resume = 0                               # else appending the full body corrupts the .part
         total = int(r.headers.get("content-length", 0)) + resume
         done = resume
-        with open(tmp, "ab" if resume else "wb") as f:
+        with open(tmp, "ab" if resumed else "wb") as f:
             for chunk in r.iter_content(chunk_size=1 << 21):  # 2MB
                 if not chunk:
                     continue
@@ -165,6 +171,10 @@ def _download(url, dest_path, progress):
                 done += len(chunk)
                 if total:
                     progress(min(done / total, 1.0), desc=f"{name}  {done/1e9:.1f}/{total/1e9:.1f} GB")
+    # verify completeness before promoting .part -> final, so a silently-dropped connection can't
+    # leave a truncated file that looks done (re-running resumes from the .part).
+    if total and os.path.getsize(tmp) < total:
+        raise IOError(f"{name}: incomplete download ({os.path.getsize(tmp)}/{total} bytes) — re-run to resume")
     os.replace(tmp, dest_path)
     return dest_path
 
@@ -195,7 +205,7 @@ def _build_tab():
             "## 🎨 Krea 2 for Forge — Setup\n"
             "First open-source **Krea 2** on Forge. Install once, click download, generate. "
             f"All weights are pulled from the public [Comfy-Org/Krea-2]({REPO_PAGE}) repo. "
-            f"Built by [sy.com]({SY})."
+            f"Built by [stableyogi.com]({SY})."
         )
         status = gr.Markdown(_status_md())
         with gr.Row():

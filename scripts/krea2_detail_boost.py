@@ -18,6 +18,11 @@ if EXT_ROOT not in sys.path:                      # scripts load alphabetically;
 from krea2 import enhance
 from modules import scripts
 
+try:                                              # header-checkbox accordion (Forge/A1111 built-in);
+    from modules.ui_components import InputAccordion   # falls back to a plain accordion if unavailable
+except Exception:
+    InputAccordion = None
+
 
 class Krea2DetailBoost(scripts.Script):
     def title(self):
@@ -27,20 +32,30 @@ class Krea2DetailBoost(scripts.Script):
         return scripts.AlwaysVisible
 
     def ui(self, is_img2img):
-        with gr.Accordion("Krea 2 Detail Boost", open=False):
+        def _controls():
             gr.Markdown(
                 "Rebalances Krea 2's 12-layer text conditioning toward the deep, fine-detail "
                 "taps — sharper identity/texture without oversaturating (RMS-safe). "
                 "Only affects Krea 2 models. *Full Enhancement Suite (advanced prompt adherence "
                 "+ more) free at [stableyogi.com](https://stableyogi.com).*"
             )
-            enabled = gr.Checkbox(label="Enable", value=False)
             preset = gr.Dropdown(label="Preset", choices=["balanced", "detail", "subtle"], value="balanced")
             strength = gr.Slider(label="Strength", minimum=0.0, maximum=2.0, step=0.05, value=1.0)
             renormalize = gr.Checkbox(
                 label="RMS renormalize (recommended)", value=True,
                 info="Hold overall conditioning magnitude constant — quality-preserving mode.",
             )
+            return preset, strength, renormalize
+
+        # The Enable checkbox lives in the accordion header — toggle it and read its status
+        # from the top of the panel without expanding (same pattern as LoRA Block Weight).
+        if InputAccordion is not None:
+            with InputAccordion(False, label="Krea 2 Detail Boost") as enabled:
+                preset, strength, renormalize = _controls()
+        else:                                          # older Forge without InputAccordion
+            with gr.Accordion("Krea 2 Detail Boost", open=False):
+                enabled = gr.Checkbox(label="Enable", value=False)
+                preset, strength, renormalize = _controls()
         return [enabled, preset, strength, renormalize]
 
     def process(self, p, enabled=False, preset="balanced", strength=1.0, renormalize=True):

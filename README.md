@@ -55,8 +55,8 @@ All files are in the public HF repo **[Comfy-Org/Krea-2](https://huggingface.co/
 
 | File | Put it in |
 |---|---|
-| `diffusion_models/krea2_turbo_fp8_scaled.safetensors` (or `_bf16`) | `models/Stablediffusion/` |
-| `diffusion_models/krea2_raw_fp8_scaled.safetensors` (or `_bf16`) | `models/Stablediffusion/` |
+| `diffusion_models/krea2_turbo_fp8_scaled.safetensors` (or `_bf16`) | `models/Stable-diffusion/` |
+| `diffusion_models/krea2_raw_fp8_scaled.safetensors` (or `_bf16`) | `models/Stable-diffusion/` |
 | `text_encoders/qwen3vl_4b_fp8_scaled.safetensors` (or `_bf16`) | `models/text_encoder/` |
 | `vae/qwen_image_vae.safetensors` | `models/VAE/` |
 
@@ -84,4 +84,5 @@ Questions, bugs, or want to show off your results? **Bring your issues to the St
 ## 📜 Credits & License
 - DiT implementation ported from **ComfyUI** (`comfy/ldm/krea2`) — therefore this extension is **GPL-3.0**.
 - Model weights: **Krea 2 Community License** (download from Comfy-Org/Krea-2; not redistributed here).
+- **Detail Boost** technique adapted from [huwhitememes/comfyui-krea2-conditioning](https://github.com/huwhitememes/comfyui-krea2-conditioning) (**Apache-2.0**), a fork of nova452/ComfyUI-ConditioningKrea2Rebalance.
 - Integration & packaging by **[stableyogi.com](https://stableyogi.com)**.

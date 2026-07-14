@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.1.2 — 2026-07-03 (download fixes + quantized DiT support)
+- **Fixed: the downloader saved checkpoints to `models/Stablediffusion` (no dash)** — a folder Forge never scans. It now downloads into Forge's real **`models/Stable-diffusion`** (or your `--ckpt-dirs`), so the model actually shows up.
+- **Fixed: two download-corruption edge cases** — (a) if a server ignores the HTTP Range header the resume no longer appends a full body onto a partial file; (b) the `.part` is verified complete against Content-Length before being finalized, so a dropped connection can't leave a truncated file that looks done (re-run to resume).
+- **New: quantized DiT support** — **INT8-ConvRot** and **GGUF** Krea 2 checkpoints now load with the matching ops (they were loading with plain ops → black/NaN images or load errors).
+- Added the **Detail Boost Apache-2.0 attribution** to the README credits.
+
+## v1.1.1 — 2026-07-03
+- **UI: the Detail Boost "Enable" now lives in the accordion header** (Forge `InputAccordion`),
+  matching LoRA Block Weight — flip it and read its on/off status from the top of the panel
+  without expanding. Falls back to a plain accordion on older Forge builds. No behaviour change.
+
 ## v1.1.0 — 2026-06-29
 - **New: Detail Boost** (opt-in accordion in txt2img, off by default). Rebalances Krea 2's
   12-layer Qwen3-VL conditioning toward the deep fine-detail taps (identity/texture) with

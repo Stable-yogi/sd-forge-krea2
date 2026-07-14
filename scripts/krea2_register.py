@@ -244,17 +244,61 @@ def _register():
         from krea2.dit import SingleStreamDiT
         L = loader
         unet_config = {k: v for k, v in guess.unet_config.items() if k not in ("image_model", "audio_model")}
-        sdtype = L.utils.weight_dtype(state_dict)
-        storage_dtype = sdtype if sdtype in (torch.bfloat16, torch.float16, torch.float8_e4m3fn, torch.float8_e5m2) else torch.bfloat16
+
+        # Krea2's DiT is built with an explicit ComfyUI-style `operations=` class, which bypasses the
+        # per-format ops selection Forge's normal loader does. So we must pick the matching quant ops
+        # ourselves — otherwise every quantized checkpoint (INT8-ConvRot, GGUF, ...) loads with plain
+        # ops, the quant metadata (weight_scale/comfy_quant, or the gguf blocks) is dropped, and you
+        # get a black/NaN image or a load error. This mirrors backend/loader.py's format handling.
+        import backend.operations as _ops
         load_device = L.memory_management.get_torch_device()
-        comp_dtype = L.memory_management.inference_cast(weight_dtype=storage_dtype, inference_device=load_device, supported_dtypes=[torch.bfloat16, torch.float16, torch.float32])
         params = L.utils.calculate_parameters(state_dict)
-        init_device = L.memory_management.unet_initial_load_device(parameters=params, dtype=storage_dtype)
-        need_cast = storage_dtype != comp_dtype
-        to_args = dict(device=init_device, dtype=storage_dtype)
+        sdtype = L.utils.weight_dtype(state_dict)          # a torch dtype, or the string "gguf"/"nf4"/"fp4"
+
+        is_int8_convrot = any(k.endswith(".weight_scale") for k in state_dict)
+        is_gguf = (sdtype == "gguf")
+
+        if is_int8_convrot:
+            # int8 weights + per-row weight_scale + comfy_quant descriptor; ForgeOperationsInt8 applies
+            # the dequant + ConvRot. dynamic_quantize=False keeps the deliberately-fp8 leftover layers
+            # (txtfusion / first / last / projections) at their stored precision instead of re-int8-ing.
+            _dit_ops = _ops.ForgeOperationsInt8
+            _dit_ops.excluded_names = []
+            _dit_ops.dynamic_quantize = False
+            storage_dtype = torch.bfloat16
+            _tag = "INT8-ConvRot -> int8 ops (per-row scale + ConvRot)"
+        elif is_gguf:
+            # gguf weights are quantized blocks dequantized on the fly by the gguf Linear.
+            _dit_ops = _ops.ForgeOperationsGGUF
+            storage_dtype = "gguf"
+            _tag = "GGUF -> gguf ops (dequant on the fly)"
+        else:
+            _dit_ops = ForgeOperations
+            storage_dtype = sdtype if sdtype in (torch.bfloat16, torch.float16, torch.float8_e4m3fn, torch.float8_e5m2) else torch.bfloat16
+            _tag = None
+
+        _wd = storage_dtype if isinstance(storage_dtype, torch.dtype) else torch.bfloat16
+        comp_dtype = L.memory_management.inference_cast(weight_dtype=_wd, inference_device=load_device, supported_dtypes=[torch.bfloat16, torch.float16, torch.float32])
+        init_device = L.memory_management.unet_initial_load_device(parameters=params, dtype=_wd)
+        if _tag:
+            print(f"[krea2] {_tag}")
+
         with L.no_init_weights():
-            with L.using_forge_operations(**to_args, manual_cast_enabled=need_cast):
-                model = SingleStreamDiT(**unet_config, operations=ForgeOperations).to(**to_args)
+            if is_gguf:
+                # move to device but NEVER cast dtype — a .to(dtype) would dequantize the gguf blocks.
+                with L.using_forge_operations(device=init_device, dtype=comp_dtype, manual_cast_enabled=False, bnb_dtype="gguf"):
+                    model = SingleStreamDiT(**unet_config, operations=_dit_ops).to(device=init_device)
+            else:
+                # INT8-ConvRot keeps some layers in fp8/bf16 (txtfusion / first / last / projectors).
+                # Those non-int8 weights must be cast to the activation dtype at forward — the DiT
+                # feeds fp32 latents into `first`, so an fp8 weight x fp32 input crashes F.linear.
+                # Forcing manual_cast makes them cast, exactly like the working fp8 checkpoint does
+                # (its storage fp8 != compute, so it already casts). Plain fp8/bf16 models: cast only
+                # when storage != compute, as before.
+                need_cast = is_int8_convrot or (storage_dtype != comp_dtype)
+                to_args = dict(device=init_device, dtype=storage_dtype)
+                with L.using_forge_operations(**to_args, manual_cast_enabled=need_cast):
+                    model = SingleStreamDiT(**unet_config, operations=_dit_ops).to(**to_args)
         L.load_state_dict(model, state_dict)
         model.config = unet_config
         model.storage_dtype = storage_dtype
