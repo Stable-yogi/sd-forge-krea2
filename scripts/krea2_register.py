@@ -362,19 +362,29 @@ def _register():
     def _is_bare_krea2_dit(path):
         try:
             p = str(path)
+            low = p.lower()
         except Exception:
-            return False
-        if not p.lower().endswith((".safetensors", ".sft")):
             return False
         try:
-            with open(p, "rb") as f:
-                n = _struct.unpack("<Q", f.read(8))[0]
-                keys = list(_json.loads(f.read(n)).keys())
+            if low.endswith((".safetensors", ".sft")):
+                with open(p, "rb") as f:
+                    n = _struct.unpack("<Q", f.read(8))[0]
+                    keys = list(_json.loads(f.read(n)).keys())
+                has_krea2 = any(("blocks.0.mod.lin" in k) or ("txtfusion.projector" in k) for k in keys)
+                has_te = any(k.startswith("text_encoders.") or (".language_model." in k) for k in keys)
+                return has_krea2 and not has_te
+            if low.endswith(".gguf"):
+                # GGUF stores tensor names as plain strings near the file start; sniff the krea2 DiT
+                # fingerprint (+ absence of a bundled TE) without a full GGUF parse. This lets a bare
+                # GGUF checkpoint (e.g. Muse Q8/Q4) auto-attach its TE+VAE just like the safetensors one.
+                with open(p, "rb") as f:
+                    head = f.read(16 << 20)
+                has_krea2 = (b"txtfusion.projector" in head) or (b"blocks.0.mod.lin" in head)
+                has_te = (b"language_model" in head) or (b"text_encoders." in head)
+                return has_krea2 and not has_te
         except Exception:
             return False
-        has_krea2 = any(("blocks.0.mod.lin" in k) or ("txtfusion.projector" in k) for k in keys)
-        has_te = any(k.startswith("text_encoders.") or (".language_model." in k) for k in keys)
-        return has_krea2 and not has_te
+        return False
 
     _orig_fl = _sdm.forge_loader
 

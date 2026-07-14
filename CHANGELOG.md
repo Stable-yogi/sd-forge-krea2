@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.2.0 — 2026-07-15 (Muse by Stable Yogi + download hardening)
+- **New: one-click "Muse by Stable Yogi" download** — the Krea 2 tab now features **Muse** (Krea 2 v1.5 Turbo, photoreal), fetched from Civitai as **Q8_0 GGUF (recommended)**, **Q4_0 GGUF (low-VRAM)**, or **fp8**. Muse is a bare DiT, so the button also pulls the base Krea 2 TE + VAE it needs. No Civitai token required.
+- **GGUF bare DiTs now auto-attach their TE + VAE** — the "seamless pieces" loader recognizes `.gguf` (not just `.safetensors`), so a GGUF Muse checkpoint loads without manually picking modules.
+- **Download hardening** — a magic-byte check rejects an HTML error page saved under a model name; a complete-but-unpromoted `.part` is now recovered instead of dead-ending on HTTP 416; and per-variant DiT detection is filename-precise, so installing a Muse build no longer mislabels or silently blocks the vanilla Turbo/RAW rows.
+
 ## v1.1.2 — 2026-07-03 (download fixes + quantized DiT support)
 - **Fixed: the downloader saved checkpoints to `models/Stablediffusion` (no dash)** — a folder Forge never scans. It now downloads into Forge's real **`models/Stable-diffusion`** (or your `--ckpt-dirs`), so the model actually shows up.
 - **Fixed: two download-corruption edge cases** — (a) if a server ignores the HTTP Range header the resume no longer appends a full body onto a partial file; (b) the `.part` is verified complete against Content-Length before being finalized, so a dropped connection can't leave a truncated file that looks done (re-run to resume).

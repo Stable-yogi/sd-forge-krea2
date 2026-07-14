@@ -20,6 +20,7 @@ Two variants: **RAW** (base, best quality) and **Turbo** (8-step distilled, fast
 ---
 
 ## ✨ Features
+- **⭐ One-click [Muse by Stable Yogi](https://civitai.com/models/2741166)** (Krea 2 v1.5 Turbo, photoreal) — GGUF or fp8, straight from the "Krea 2" tab.
 - Native Krea 2 architecture in Forge — no ComfyUI needed.
 - **Both loading streams supported:**
   - **Full model** — one combined checkpoint with everything baked in.
@@ -46,8 +47,8 @@ Two variants: **RAW** (base, best quality) and **Turbo** (8-step distilled, fast
 
 ## ⬇️ Getting the models (easy way)
 In the **Krea 2** tab:
-1. Pick a precision — **fp8** (smaller/faster) or **bf16** (max quality).
-2. Click **Download Recommended Set** (Turbo DiT + Text Encoder + VAE).
+1. **⭐ Download Muse** (recommended) — [Muse by Stable Yogi](https://civitai.com/models/2741166), a photoreal Krea 2 v1.5 Turbo checkpoint. Pick a build (**Q8 GGUF** / **Q4 GGUF** low-VRAM / **fp8**); the button also grabs the base **TE + VAE** it needs. No Civitai token required.
+2. Or grab the **vanilla base Krea 2** (Turbo/RAW DiT + TE + VAE) with the buttons below.
 3. Files land in Forge's standard folders automatically — **no command-line flags needed.**
 
 ### Manual download (alternative)

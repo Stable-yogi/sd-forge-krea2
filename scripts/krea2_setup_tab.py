@@ -42,6 +42,28 @@ COMPONENTS = {
 }
 _EXTS = (".safetensors", ".sft", ".gguf")
 
+# ── Featured checkpoint: "Muse by Stable Yogi" — Krea 2 v1.5 Turbo (photoreal) ──
+# A bare Krea 2 DiT (turbo, 8-step); it plugs into the SAME base Krea 2 TE + VAE the
+# downloader already fetches. Civitai serves these anonymously (307 -> signed R2 CDN,
+# Range/resume supported), so no API token is needed. The two GGUF builds share one
+# filename on Civitai, so we save them under disambiguated names (Q8_0 / Q4_0).
+CIVITAI_MUSE_PAGE = "https://civitai.com/models/2741166"
+# Filenames deliberately avoid the substrings "turbo"/"raw" (they'd collide with the base
+# dit_turbo/dit_raw detection keywords) and use a specific "krea2muse" token instead of bare
+# "muse" (which false-matches amuse/museum/...). All three lowercase to contain "krea2muse".
+MUSE_KW = ("krea2muse",)
+MUSE_VARIANTS = {
+    "Q8_0 GGUF — recommended (~14 GB)": dict(
+        url="https://civitai.com/api/download/models/3092719?type=Model&format=GGUF&size=pruned&quantType=Q8_0",
+        fname="krea2Muse_v15_Q8_0.gguf"),
+    "Q4_0 GGUF — low VRAM (~8 GB)": dict(
+        url="https://civitai.com/api/download/models/3092719?type=Model&format=GGUF&size=pruned&quantType=Q4_0",
+        fname="krea2Muse_v15_Q4_0.gguf"),
+    "fp8 safetensors — compat (~12.5 GB)": dict(
+        url="https://civitai.com/api/download/models/3092719",
+        fname="krea2Muse_v15_fp8.safetensors"),
+}
+
 
 def _models_root():
     try:
@@ -101,7 +123,7 @@ def _classify(kind, keys):
     return False
 
 
-def _present(kw, kind):
+def _present(kw, kind, content=True):
     _, scan = _dest_dirs(kind)
     # 1. fast filename-keyword match
     for d in scan:
@@ -112,27 +134,46 @@ def _present(kw, kind):
                     return os.path.join(d, n)
         except Exception:
             continue
-    # 2. content fallback — detect RENAMED files by their keys (cap per dir to stay fast)
-    for d in scan:
-        try:
-            files = [n for n in os.listdir(d) if n.lower().endswith((".safetensors", ".sft"))]
-            if len(files) > 80:           # don't header-scan a huge checkpoint dir
+    # 2. content fallback — detect RENAMED files by their keys (cap per dir to stay fast).
+    #    Skipped when content=False: a krea2 DiT fingerprint can't tell Muse/turbo/raw apart, so
+    #    per-variant DiT rows pass content=False (filename-only) to avoid cross-attributing one
+    #    file to another variant. TE/VAE keep content detection (their fingerprints are unique).
+    if content:
+        for d in scan:
+            try:
+                files = [n for n in os.listdir(d) if n.lower().endswith((".safetensors", ".sft"))]
+                if len(files) > 80:           # don't header-scan a huge checkpoint dir
+                    continue
+                for n in files:
+                    p = os.path.join(d, n)
+                    if _classify(kind, _st_keys(p)):
+                        return p
+            except Exception:
                 continue
-            for n in files:
-                p = os.path.join(d, n)
-                if _classify(kind, _st_keys(p)):
-                    return p
-        except Exception:
-            continue
     return None
+
+
+def _any_dit():
+    """True if any loadable Krea 2 DiT is present — Muse / turbo / raw by name, or a renamed
+    krea2 DiT .safetensors by content. (GGUF is name-only; _st_keys can't read gguf headers.)"""
+    if (_present(MUSE_KW, "ckpt", content=False)
+            or _present(COMPONENTS["dit_turbo"]["kw"], "ckpt", content=False)
+            or _present(COMPONENTS["dit_raw"]["kw"], "ckpt", content=False)):
+        return True
+    return bool(_present(("__krea2dit__",), "ckpt", content=True))  # bogus kw -> falls to content scan
 
 
 def _status_md():
     rows = ["| Component | Folder | Status |", "|---|---|---|"]
+    tgt_ckpt, _ = _dest_dirs("ckpt")
+    muse_hit = _present(MUSE_KW, "ckpt", content=False)  # filename-only: never claim another DiT is "Muse"
+    rows.append(f"| ⭐ Muse (Krea 2 v1.5 Turbo) | `{tgt_ckpt}` | "
+                + (f"✅ `{os.path.basename(muse_hit)}`" if muse_hit else "— not downloaded") + " |")
     ready_req = True
     for key, c in COMPONENTS.items():
         target, _ = _dest_dirs(c["dest"])
-        hit = _present(c["kw"], c["dest"])
+        # DiT rows are filename-only (fingerprint can't tell turbo/raw/muse apart); TE/VAE keep content detection.
+        hit = _present(c["kw"], c["dest"], content=(c["dest"] != "ckpt"))
         if hit:
             mark = f"✅ `{os.path.basename(hit)}`"
         else:
@@ -140,12 +181,29 @@ def _status_md():
             if "REQUIRED" in c["label"]:
                 ready_req = False
         rows.append(f"| {c['label']} | `{target}` | {mark} |")
-    dit = _present(COMPONENTS["dit_turbo"]["kw"], "ckpt") or _present(COMPONENTS["dit_raw"]["kw"], "ckpt")
-    ready = ready_req and bool(dit)
+    ready = ready_req and _any_dit()
     banner = ("### ✅ Krea 2 is ready — pick UI Preset **krea2**, choose a Krea 2 checkpoint, generate."
               if ready else
               "### ⚠️ Setup incomplete — download the ❌ items below (you need at least one DiT + the TE + the VAE).")
     return banner + "\n\n" + "\n".join(rows)
+
+
+def _verify_magic(path):
+    """Reject an obvious non-model — e.g. a Cloudflare/login/error HTML page that a server returned
+    with 200 and we saved under a .gguf/.safetensors name. Cheap header check, no full parse."""
+    low = path.lower()
+    with open(path, "rb") as f:
+        head = f.read(8)
+    if low.endswith(".gguf"):
+        if head[:4] != b"GGUF":
+            raise IOError("downloaded file is not a GGUF (looks like an error page) — delete the .part and retry")
+    elif low.endswith((".safetensors", ".sft")):
+        import struct as _s
+        if len(head) < 8:
+            raise IOError("downloaded file too small to be a safetensors")
+        n = _s.unpack("<Q", head)[0]              # safetensors header = leading uint64 length
+        if not (0 < n < os.path.getsize(path)):
+            raise IOError("downloaded file is not a valid safetensors (looks like an error page) — delete the .part and retry")
 
 
 def _download(url, dest_path, progress):
@@ -153,9 +211,21 @@ def _download(url, dest_path, progress):
     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
     tmp = dest_path + ".part"
     resume = os.path.getsize(tmp) if os.path.exists(tmp) else 0
-    headers = {"Range": f"bytes={resume}-"} if resume else {}
+    headers = {"User-Agent": "Mozilla/5.0 (sd-forge-krea2)"}  # some CDNs reject a bare UA
+    if resume:
+        headers["Range"] = f"bytes={resume}-"
     name = os.path.basename(dest_path)
     with requests.get(url, stream=True, headers=headers, timeout=120) as r:
+        if r.status_code == 416 and resume:
+            # Range past EOF: the .part is already complete but was never promoted last time (a kill
+            # between write and os.replace, or a locked dest). Promote it instead of failing forever.
+            try:
+                _verify_magic(tmp)
+            except Exception:
+                os.remove(tmp)
+                raise
+            os.replace(tmp, dest_path)
+            return dest_path
         if r.status_code not in (200, 206):
             r.raise_for_status()
         resumed = (r.status_code == 206)            # server actually honored the Range request
@@ -175,6 +245,15 @@ def _download(url, dest_path, progress):
     # leave a truncated file that looks done (re-running resumes from the .part).
     if total and os.path.getsize(tmp) < total:
         raise IOError(f"{name}: incomplete download ({os.path.getsize(tmp)}/{total} bytes) — re-run to resume")
+    # reject an error page / non-model saved under a model name (delete so a retry starts clean).
+    try:
+        _verify_magic(tmp)
+    except Exception:
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+        raise
     os.replace(tmp, dest_path)
     return dest_path
 
@@ -186,7 +265,7 @@ def _do(keys, precision, progress=gr.Progress()):
         rel = c["fp8"] if precision == "fp8 (smaller / faster)" else c["bf16"]
         target_dir, _ = _dest_dirs(c["dest"])
         dest = os.path.join(target_dir, os.path.basename(rel))
-        if _present(c["kw"], c["dest"]):
+        if _present(c["kw"], c["dest"], content=(c["dest"] != "ckpt")):
             log.append(f"⏭️  {c['label']} — already present, skipped")
             continue
         try:
@@ -197,6 +276,31 @@ def _do(keys, precision, progress=gr.Progress()):
             log.append(f"❌ {c['label']} FAILED: {e}")
     log.append("\nDone. Click 'Refresh status'. New models also need a checkpoint/module refresh in Forge (🔄 in the dropdowns).")
     return _status_md(), "\n".join(log)
+
+
+def _do_muse(variant, precision, progress=gr.Progress()):
+    """Download the featured Muse checkpoint from Civitai, then ensure the base TE + VAE.
+    Muse is a bare DiT, so it needs the same Krea 2 text encoder + VAE as the base model."""
+    log = []
+    v = MUSE_VARIANTS.get(variant) or next(iter(MUSE_VARIANTS.values()))
+    target_dir, scan = _dest_dirs("ckpt")
+    # skip if THIS exact build already exists in any scanned ckpt dir (not just the download target),
+    # so a custom --ckpt-dirs doesn't trigger a needless multi-GB re-download of a file Forge already sees.
+    existing = next((os.path.join(d, v["fname"]) for d in scan
+                     if os.path.exists(os.path.join(d, v["fname"]))), None)
+    if existing:
+        log.append(f"⏭️  Muse ({variant}) — already present, skipped")
+    else:
+        dest = os.path.join(target_dir, v["fname"])
+        try:
+            progress(0.0, desc=f"Starting {v['fname']} …")
+            _download(v["url"], dest, progress)
+            log.append(f"✅ Muse ({variant}) → {dest}")
+        except Exception as e:
+            log.append(f"❌ Muse ({variant}) FAILED: {e}")
+    # Muse is a bare DiT — pull the base Krea 2 TE + VAE too (_do adds its own footer).
+    _, tvlog = _do(["te", "vae"], precision, progress)
+    return _status_md(), "\n".join(log) + "\n" + tvlog
 
 
 def _build_tab():
@@ -215,8 +319,24 @@ def _build_tab():
                 info="fp8 ≈ half the size/VRAM, near-identical quality. bf16 = maximum fidelity.",
             )
             refresh = gr.Button("🔄 Refresh status")
-        gr.Markdown("**Quick start** — grab the essential set (Turbo DiT + Text Encoder + VAE):")
-        get_all = gr.Button("⬇️  Download Recommended Set", variant="primary")
+
+        # ── Featured: Muse by Stable Yogi (Krea 2 v1.5 Turbo) ─────────────────
+        gr.Markdown(
+            "### ⭐ Featured — **Muse by Stable Yogi** · Krea 2 v1.5 Turbo (photoreal)\n"
+            "Fast **8-step** photoreal checkpoint tuned by Stable Yogi "
+            "(**8 steps · CFG 1 · Euler · Simple**). It's a bare DiT, so this also grabs the "
+            f"base **TE + VAE** it needs. [Model page]({CIVITAI_MUSE_PAGE})."
+        )
+        with gr.Row():
+            muse_variant = gr.Dropdown(
+                choices=list(MUSE_VARIANTS.keys()), value=list(MUSE_VARIANTS.keys())[0],
+                label="Muse build", scale=3,
+                info="Q8 = best quality · Q4 = lowest VRAM · fp8 = widest compat. TE/VAE follow the Precision above.",
+            )
+            get_muse = gr.Button("⭐ Download Muse (+ TE + VAE)", variant="primary", scale=1)
+
+        gr.Markdown("---\n**Vanilla base Krea 2** (optional) — stock Comfy-Org checkpoints; the TE + VAE are shared with Muse:")
+        get_all = gr.Button("⬇️  Download base Set (Turbo DiT + Text Encoder + VAE)")
         with gr.Row():
             get_turbo = gr.Button("⬇️ Turbo DiT")
             get_raw = gr.Button("⬇️ RAW DiT")
@@ -225,9 +345,9 @@ def _build_tab():
         logbox = gr.Textbox(label="Download log", lines=8, interactive=False)
         gr.Markdown(
             "### How to use\n"
-            "1. Download the **Recommended Set** above (or the bf16 set for max quality).\n"
+            "1. Click **⭐ Download Muse** (recommended) — or the base set. Precision **fp8** = less VRAM, **bf16** = max fidelity (applies to the TE + VAE).\n"
             "2. In txt2img, set **UI Preset → krea2** (auto-applies Euler / Simple / 28 steps / CFG 4.5 **and auto-selects the TE + VAE**).\n"
-            "3. Pick a **Krea 2 checkpoint** (Turbo → 8 steps, CFG 1; RAW → 28 steps, CFG 4.5).\n"
+            "3. Pick a **Krea 2 checkpoint** (Muse / Turbo → 8 steps, CFG 1; RAW → 28 steps, CFG 4.5).\n"
             "4. Use **natural-language prompts** (Qwen3-VL dislikes JSON). Generate.\n\n"
             "Files download into Forge's standard folders, so no command-line flags are needed. "
             f"Weights: [Comfy-Org/Krea-2]({REPO_PAGE}) · Krea 2 Community License."
@@ -249,6 +369,7 @@ def _build_tab():
             return _do(["vae"], precision, progress)
 
         refresh.click(lambda: _status_md(), outputs=[status])
+        get_muse.click(_do_muse, inputs=[muse_variant, precision], outputs=[status, logbox])
         get_all.click(dl_all, inputs=[precision], outputs=[status, logbox])
         get_turbo.click(dl_turbo, inputs=[precision], outputs=[status, logbox])
         get_raw.click(dl_raw, inputs=[precision], outputs=[status, logbox])
