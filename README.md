@@ -62,7 +62,7 @@ All files are in the public HF repo **[Comfy-Org/Krea-2](https://huggingface.co/
 | `vae/qwen_image_vae.safetensors` | `models/VAE/` |
 
 ## 🚀 Usage
-1. In **txt2img**, set **UI Preset → `krea2`** (applies Euler / Simple / 28 steps / CFG 4.5 and auto-selects the TE + VAE).
+1. In **txt2img**, set **UI Preset → `krea2`** (applies Euler / Simple / 8 steps / CFG 1 and auto-selects the TE + VAE).
 2. Pick a **Krea 2 checkpoint**:
    - **Turbo** → 8 steps, CFG 1.0
    - **RAW** → 28 steps, CFG 4.5

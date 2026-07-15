@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.1 — 2026-07-15
+- **Preset fix: the `krea2` UI preset now defaults to 8 steps / CFG 1** (Turbo + Muse) instead of RAW's 28 / 4.5. Since Turbo and Muse are the recommended 8-step models, the preset matches them out of the box. RAW users bump steps→28 and CFG→4.5.
+- **Wan 2.1 VAE support** — the auto-loader now recognizes and attaches the **Wan 2.1 VAE** (which Muse 1.5+ pairs with), alongside the Qwen-Image VAE.
+- **Default resolution is now 1024×1536** (portrait) for the krea2 preset.
+- **Preset-loading hardened** — the preset's sampler/steps/CFG and module options are ensured right before Forge reads them, with a diagnostic log line on selection.
+
 ## v1.2.0 — 2026-07-15 (Muse by Stable Yogi + download hardening)
 - **New: one-click "Muse by Stable Yogi" download** — the Krea 2 tab now features **Muse** (Krea 2 v1.5 Turbo, photoreal), fetched from Civitai as **Q8_0 GGUF (recommended)**, **Q4_0 GGUF (low-VRAM)**, or **fp8**. Muse is a bare DiT, so the button also pulls the base Krea 2 TE + VAE it needs. No Civitai token required.
 - **GGUF bare DiTs now auto-attach their TE + VAE** — the "seamless pieces" loader recognizes `.gguf` (not just `.safetensors`), so a GGUF Muse checkpoint loads without manually picking modules.

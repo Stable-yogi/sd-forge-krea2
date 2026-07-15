@@ -14,15 +14,15 @@ if EXT_ROOT not in sys.path:
     sys.path.insert(0, EXT_ROOT)
 CFG_DIR = os.path.join(EXT_ROOT, "hf_config", "Krea2")
 
-# Recommended Krea2 RAW sampling defaults (RAW is cfg-based; Turbo users drop steps→8, cfg→1).
-# These are READ-ONLY via getattr in on_preset_change, so a plain data inject suffices.
+# Recommended Krea2 Turbo / Muse sampling defaults (8-step distilled, cfg 1 = guidance off).
+# RAW users bump steps->28 and cfg->4.5. READ-ONLY via getattr in on_preset_change (plain inject).
 KREA2_PRESET_DEFAULTS = {
     "krea2_t2i_sampler": "Euler", "krea2_i2i_sampler": "Euler",
     "krea2_t2i_scheduler": "Simple", "krea2_i2i_scheduler": "Simple",
-    "krea2_t2i_step": 28, "krea2_t2i_hr_step": 28, "krea2_i2i_step": 28,
-    "krea2_t2i_cfg": 4.5, "krea2_t2i_hr_cfg": 4.5, "krea2_i2i_cfg": 4.5,
-    "krea2_t2i_width": 1024, "krea2_t2i_height": 1024,
-    "krea2_i2i_width": 1024, "krea2_i2i_height": 1024,
+    "krea2_t2i_step": 8, "krea2_t2i_hr_step": 8, "krea2_i2i_step": 8,
+    "krea2_t2i_cfg": 1.0, "krea2_t2i_hr_cfg": 1.0, "krea2_i2i_cfg": 1.0,
+    "krea2_t2i_width": 1024, "krea2_t2i_height": 1536,
+    "krea2_i2i_width": 1024, "krea2_i2i_height": 1536,
     "krea2_t2i_batch_size": 1, "krea2_i2i_batch_size": 1,
 }
 # These hidden per-preset opts are WRITTEN via opts.set() in checkpoint/modules/dtype_change,
@@ -59,6 +59,13 @@ def _is_qwen3_te(keys):
 def _is_qwen_vae(keys):
     return (any(k.startswith("decoder.") for k in keys) and any(k.startswith("encoder.") for k in keys)
             and any(("downsamples" in k or "upsamples" in k) for k in keys)
+            and not any("visual" in k for k in keys))
+
+
+def _is_wan_vae(keys):
+    """Wan 2.1 VAE (Muse 1.5+ pairs with this instead of the Qwen-Image VAE): encoder/decoder
+    present, no vision tower. Structurally distinct from the Qwen VAE but both are Krea2-compatible."""
+    return (any(k.startswith("decoder.") for k in keys) and any(k.startswith("encoder.") for k in keys)
             and not any("visual" in k for k in keys))
 
 
@@ -122,9 +129,10 @@ def _find_krea2_modules():
     te = scan(te_dirs, any_kw=("qwen3vl", "qwen3_vl", "qwen3-vl"), prefer=("bf16",))   # bf16 default
     if te is None:                                  # renamed file? fall back to key-based detection
         te = _content_scan(te_dirs, _is_qwen3_te, prefer=("bf16",))
-    vae = scan(vae_dirs, all_kw=("vae",), any_kw=("qwen",), prefer=("qwen_image_vae",), avoid=("clear",))
+    # VAE: Krea2 checkpoints pair with EITHER the Qwen-Image VAE (V1) or the Wan 2.1 VAE (Muse 1.5+).
+    vae = scan(vae_dirs, all_kw=("vae",), any_kw=("qwen", "wan"), prefer=("wan_2.1_vae", "qwen_image_vae"), avoid=("clear",))
     if vae is None:
-        vae = _content_scan(vae_dirs, _is_qwen_vae)
+        vae = _content_scan(vae_dirs, lambda ks: _is_qwen_vae(ks) or _is_wan_vae(ks))
     return [m for m in (te, vae) if m]
 
 
@@ -139,11 +147,31 @@ def _patch_preset_auto_modules():
     _orig = ME.on_preset_change
 
     def _wrapped(preset):
-        if preset == "krea2" and not (shared.opts.data.get("forge_additional_modules_krea2") or []):
-            auto = _find_krea2_modules()
-            if auto:
-                shared.opts.data["forge_additional_modules_krea2"] = auto
-        return _orig(preset)
+        if preset == "krea2":
+            try:
+                # Belt-and-suspenders: ensure the preset's opts exist right before Forge reads them
+                # (covers any data reset between registration and selection).
+                for k, v in KREA2_PRESET_DEFAULTS.items():
+                    shared.opts.data.setdefault(k, v)
+                for k, v in KREA2_HIDDEN_OPTS.items():
+                    shared.opts.data.setdefault(k, v)
+                if not (shared.opts.data.get("forge_additional_modules_krea2") or []):
+                    auto = _find_krea2_modules()
+                    if auto:
+                        shared.opts.data["forge_additional_modules_krea2"] = auto
+            except Exception:
+                print("[krea2] preset pre-fill error:\n" + traceback.format_exc())
+        try:
+            result = _orig(preset)
+            if preset == "krea2":                       # diagnostic: shows what actually gets applied
+                mods = [os.path.basename(m) for m in (shared.opts.data.get("forge_additional_modules_krea2") or [])]
+                print("[krea2] preset selected -> step=%s cfg=%s sampler=%s scheduler=%s modules=%s"
+                      % (shared.opts.data.get("krea2_t2i_step"), shared.opts.data.get("krea2_t2i_cfg"),
+                         shared.opts.data.get("krea2_t2i_sampler"), shared.opts.data.get("krea2_t2i_scheduler"), mods))
+            return result
+        except Exception:
+            print("[krea2] on_preset_change('%s') FAILED:\n%s" % (preset, traceback.format_exc()))
+            raise
 
     _wrapped._krea2 = True
     ME.on_preset_change = _wrapped

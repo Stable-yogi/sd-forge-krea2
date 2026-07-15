@@ -346,7 +346,7 @@ def _build_tab():
         gr.Markdown(
             "### How to use\n"
             "1. Click **⭐ Download Muse** (recommended) — or the base set. Precision **fp8** = less VRAM, **bf16** = max fidelity (applies to the TE + VAE).\n"
-            "2. In txt2img, set **UI Preset → krea2** (auto-applies Euler / Simple / 28 steps / CFG 4.5 **and auto-selects the TE + VAE**).\n"
+            "2. In txt2img, set **UI Preset → krea2** (auto-applies Euler / Simple / 8 steps / CFG 1 **and auto-selects the TE + VAE**).\n"
             "3. Pick a **Krea 2 checkpoint** (Muse / Turbo → 8 steps, CFG 1; RAW → 28 steps, CFG 4.5).\n"
             "4. Use **natural-language prompts** (Qwen3-VL dislikes JSON). Generate.\n\n"
             "Files download into Forge's standard folders, so no command-line flags are needed. "
