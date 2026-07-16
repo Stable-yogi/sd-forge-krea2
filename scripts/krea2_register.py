@@ -21,8 +21,8 @@ KREA2_PRESET_DEFAULTS = {
     "krea2_t2i_scheduler": "Simple", "krea2_i2i_scheduler": "Simple",
     "krea2_t2i_step": 8, "krea2_t2i_hr_step": 8, "krea2_i2i_step": 8,
     "krea2_t2i_cfg": 1.0, "krea2_t2i_hr_cfg": 1.0, "krea2_i2i_cfg": 1.0,
-    "krea2_t2i_width": 1024, "krea2_t2i_height": 1536,
-    "krea2_i2i_width": 1024, "krea2_i2i_height": 1536,
+    "krea2_t2i_width": 896, "krea2_t2i_height": 1152,
+    "krea2_i2i_width": 896, "krea2_i2i_height": 1152,
     "krea2_t2i_batch_size": 1, "krea2_i2i_batch_size": 1,
 }
 # These hidden per-preset opts are WRITTEN via opts.set() in checkpoint/modules/dtype_change,

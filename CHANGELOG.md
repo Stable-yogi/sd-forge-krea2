@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.2 — 2026-07-16
+- **Preset default resolution is now 896×1152** (portrait, ~1 MP) for the `krea2` preset, replacing 1024×1536. Sampler/steps/CFG unchanged (Euler / Simple / 8 / 1).
+
 ## v1.2.1 — 2026-07-15
 - **Preset fix: the `krea2` UI preset now defaults to 8 steps / CFG 1** (Turbo + Muse) instead of RAW's 28 / 4.5. Since Turbo and Muse are the recommended 8-step models, the preset matches them out of the box. RAW users bump steps→28 and CFG→4.5.
 - **Wan 2.1 VAE support** — the auto-loader now recognizes and attaches the **Wan 2.1 VAE** (which Muse 1.5+ pairs with), alongside the Qwen-Image VAE.
