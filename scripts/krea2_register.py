@@ -149,10 +149,12 @@ def _patch_preset_auto_modules():
     def _wrapped(preset):
         if preset == "krea2":
             try:
-                # Belt-and-suspenders: ensure the preset's opts exist right before Forge reads them
-                # (covers any data reset between registration and selection).
+                # FORCE the krea2 preset's sampler/scheduler/steps/cfg/size to the intended turbo
+                # values every time it's selected. (Was setdefault, which left stale saved values —
+                # e.g. an old 28 steps / CFG 4.5 — stuck; that's why cfg/steps "didn't apply".)
                 for k, v in KREA2_PRESET_DEFAULTS.items():
-                    shared.opts.data.setdefault(k, v)
+                    shared.opts.data[k] = v
+                # Checkpoint / modules stay per-user (setdefault, never overwrite their choice).
                 for k, v in KREA2_HIDDEN_OPTS.items():
                     shared.opts.data.setdefault(k, v)
                 if not (shared.opts.data.get("forge_additional_modules_krea2") or []):

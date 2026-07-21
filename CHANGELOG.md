@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.3 — 2026-07-22
+- **Fixed: the `krea2` preset now FORCES its Turbo defaults (8 steps / CFG 1 / Euler / Simple) on every selection.** Earlier versions seeded these with `setdefault`, which never overwrites a value already saved in `config.json`. Anyone who installed before v1.2.1 had the old RAW-style **28 steps / CFG 4.5** written into their config, and updating the extension could not dislodge it — so selecting the preset kept silently applying 28 / 4.5. On the 8-step distilled Turbo/Muse checkpoints that produces exactly the reported symptoms: hatching/hachures in dark areas, over-sharpening, and apparent "hallucinations above ~20 steps" (all classic too-high-CFG artifacts). The preset now sets the correct sampling values every time it is selected; your checkpoint / VAE / TE choices stay per-user (still `setdefault`, never overwritten).
+
 ## v1.2.2 — 2026-07-16
 - **Preset default resolution is now 896×1152** (portrait, ~1 MP) for the `krea2` preset, replacing 1024×1536. Sampler/steps/CFG unchanged (Euler / Simple / 8 / 1).
 
