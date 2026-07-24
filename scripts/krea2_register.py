@@ -285,10 +285,44 @@ def _register():
         params = L.utils.calculate_parameters(state_dict)
         sdtype = L.utils.weight_dtype(state_dict)          # a torch dtype, or the string "gguf"/"nf4"/"fp4"
 
-        is_int8_convrot = any(k.endswith(".weight_scale") for k in state_dict)
+        # comfy_quant MIXED-PRECISION checkpoints (NVFP4 / mxfp8 / per-layer mixed). These carry a
+        # per-tensor `.weight_scale_2` that INT8-ConvRot does NOT — but they ALSO carry `.weight_scale`,
+        # so this MUST be tested BEFORE the int8 branch, or an NVFP4 model is misrouted to int8 ops and
+        # dies at the first un-quantized layer with
+        #   "RuntimeError: self and mat2 must have the same dtype, but got Float and BFloat16".
+        # Forge already knows how to build the right ops from the comfy_quant descriptors, so instead of
+        # hand-picking a class we ask it for the same MixedPrecisionOps its native loader would use.
+        _quant_cfg = None
+        if any(k.endswith(".weight_scale_2") for k in state_dict):
+            try:
+                from backend.state_dict import detect_quantization
+                _quant_cfg = detect_quantization(state_dict, is_unet=True)
+            except Exception:
+                _quant_cfg = None
+
+        is_mixed = _quant_cfg is not None
+        is_int8_convrot = (not is_mixed) and any(k.endswith(".weight_scale") for k in state_dict)
         is_gguf = (sdtype == "gguf")
 
-        if is_int8_convrot:
+        if is_mixed:
+            from backend.operations_mixed_precision import mixed_precision_ops
+            _mm = L.memory_management
+            _cdt = torch.bfloat16 if _mm.should_use_bf16(load_device) else torch.float32
+            _disabled = set()
+            for _flag, _names in ((("supports_nvfp4_compute"), ("nvfp4",)),
+                                  (("supports_mxfp8_compute"), ("mxfp8",)),
+                                  (("supports_fp8_compute"), ("float8_e4m3fn", "float8_e5m2"))):
+                _fn = getattr(_mm, _flag, None)
+                if _fn is not None and not _fn(load_device):
+                    _disabled.update(_names)
+            _cfg = dict(_quant_cfg)
+            _full = _cfg.pop("TE", False)
+            _dit_ops = mixed_precision_ops(quant_config=_cfg, compute_dtype=_cdt,
+                                           full_precision_mm=_full, disabled=_disabled)
+            storage_dtype = torch.bfloat16
+            _tag = ("comfy_quant (NVFP4/mixed) -> mixed-precision ops"
+                    + (f"; unsupported on this GPU, dequantized: {sorted(_disabled)}" if _disabled else ""))
+        elif is_int8_convrot:
             # int8 weights + per-row weight_scale + comfy_quant descriptor; ForgeOperationsInt8 applies
             # the dequant + ConvRot. dynamic_quantize=False keeps the deliberately-fp8 leftover layers
             # (txtfusion / first / last / projections) at their stored precision instead of re-int8-ing.
@@ -317,6 +351,13 @@ def _register():
             if is_gguf:
                 # move to device but NEVER cast dtype — a .to(dtype) would dequantize the gguf blocks.
                 with L.using_forge_operations(device=init_device, dtype=comp_dtype, manual_cast_enabled=False, bnb_dtype="gguf"):
+                    model = SingleStreamDiT(**unet_config, operations=_dit_ops).to(device=init_device)
+            elif is_mixed:
+                # Like gguf: move to device, never blanket-cast dtype (the packed 4-bit weights and
+                # their fp8/fp32 scales must keep their stored dtypes). manual_cast handles the
+                # un-quantized leftovers (first / last / txtfusion / projectors) at forward time.
+                with L.using_forge_operations(device=init_device, dtype=comp_dtype,
+                                              manual_cast_enabled=True, bnb_dtype=dict(_quant_cfg)):
                     model = SingleStreamDiT(**unet_config, operations=_dit_ops).to(device=init_device)
             else:
                 # INT8-ConvRot keeps some layers in fp8/bf16 (txtfusion / first / last / projectors).
