@@ -394,7 +394,10 @@ def _register():
     from krea2.engine import Krea2 as Krea2Engine
     Krea2Engine.matched_guesses = [Krea2Base]
     if Krea2Engine not in loader.possible_models:
-        loader.possible_models.append(Krea2Engine)
+        try:
+            loader.possible_models.append(Krea2Engine)
+        except AttributeError:                        # newer Forge: immutable tuple
+            loader.possible_models = (*loader.possible_models, Krea2Engine)
 
     # --- 5. PIECEWISE + fp8: load the raw DiT as checkpoint and pick the Qwen3-VL TE
     #        (bf16 or fp8) + Qwen VAE from the UI module dropdowns (no 34GB bake).
@@ -422,40 +425,52 @@ def _register():
     # --- 6. UI preset 'krea2' is registered INDEPENDENTLY at the module bottom, so it appears in
     #        the dropdown even if an earlier arch step hits a Forge-version snag. ---
 
-    # --- 7. SEAMLESS PIECES: a bare krea2 DiT auto-loads its TE+VAE, so loading "pieces"
-    #        works exactly like the full bake with no manual module-picking. Both streams
-    #        supported: full combined checkpoint OR bare DiT + auto TE/VAE.
-    #        (sd_models binds forge_loader by name at import, so patch THAT reference.) ---
+    # --- 7. SEAMLESS PIECES is registered at module bottom via _register_auto_pieces(), so it
+    #        also runs on native-Krea2 Forge builds where this whole _register() is skipped. ---
+
+    print("[krea2] registered: arch 'krea2' (SingleStreamDiT + Qwen3-VL + Qwen VAE) + "
+          "piecewise/fp8 + auto TE/VAE for bare DiTs + 'krea2' UI preset.")
+
+
+def _is_bare_krea2_dit(path):
+    """A checkpoint that IS a krea2 DiT but carries no text encoder (needs TE+VAE attached)."""
     import json as _json
     import struct as _struct
-    import modules.sd_models as _sdm
-
-    def _is_bare_krea2_dit(path):
-        try:
-            p = str(path)
-            low = p.lower()
-        except Exception:
-            return False
-        try:
-            if low.endswith((".safetensors", ".sft")):
-                with open(p, "rb") as f:
-                    n = _struct.unpack("<Q", f.read(8))[0]
-                    keys = list(_json.loads(f.read(n)).keys())
-                has_krea2 = any(("blocks.0.mod.lin" in k) or ("txtfusion.projector" in k) for k in keys)
-                has_te = any(k.startswith("text_encoders.") or (".language_model." in k) for k in keys)
-                return has_krea2 and not has_te
-            if low.endswith(".gguf"):
-                # GGUF stores tensor names as plain strings near the file start; sniff the krea2 DiT
-                # fingerprint (+ absence of a bundled TE) without a full GGUF parse. This lets a bare
-                # GGUF checkpoint (e.g. Muse Q8/Q4) auto-attach its TE+VAE just like the safetensors one.
-                with open(p, "rb") as f:
-                    head = f.read(16 << 20)
-                has_krea2 = (b"txtfusion.projector" in head) or (b"blocks.0.mod.lin" in head)
-                has_te = (b"language_model" in head) or (b"text_encoders." in head)
-                return has_krea2 and not has_te
-        except Exception:
-            return False
+    try:
+        p = str(path)
+        low = p.lower()
+    except Exception:
         return False
+    try:
+        if low.endswith((".safetensors", ".sft")):
+            with open(p, "rb") as f:
+                n = _struct.unpack("<Q", f.read(8))[0]
+                keys = list(_json.loads(f.read(n)).keys())
+            has_krea2 = any(("blocks.0.mod.lin" in k) or ("txtfusion.projector" in k) for k in keys)
+            has_te = any(k.startswith("text_encoders.") or (".language_model." in k) for k in keys)
+            return has_krea2 and not has_te
+        if low.endswith(".gguf"):
+            # GGUF stores tensor names as plain strings near the file start; sniff the krea2 DiT
+            # fingerprint (+ absence of a bundled TE) without a full GGUF parse. This lets a bare
+            # GGUF checkpoint (e.g. Muse Q8/Q4) auto-attach its TE+VAE just like the safetensors one.
+            with open(p, "rb") as f:
+                head = f.read(16 << 20)
+            has_krea2 = (b"txtfusion.projector" in head) or (b"blocks.0.mod.lin" in head)
+            has_te = (b"language_model" in head) or (b"text_encoders." in head)
+            return has_krea2 and not has_te
+    except Exception:
+        return False
+    return False
+
+
+def _register_auto_pieces():
+    """SEAMLESS PIECES: a bare krea2 DiT auto-loads its TE+VAE, so loading "pieces" works
+    exactly like a full bake with no manual module-picking. Registered on BOTH Forge
+    generations — on native-Krea2 builds this is precisely what fixes the community
+    'AssertionError: You do not have Qwen3 state dict!' (bare DiT selected, no modules).
+    (sd_models binds forge_loader by name at import, so patch THAT reference too.)"""
+    import backend.loader as loader
+    import modules.sd_models as _sdm
 
     _orig_fl = _sdm.forge_loader
 
@@ -478,18 +493,63 @@ def _register():
         _sdm.forge_loader = _auto_pieces_forge_loader
         loader.forge_loader = _auto_pieces_forge_loader
 
-    print("[krea2] registered: arch 'krea2' (SingleStreamDiT + Qwen3-VL + Qwen VAE) + "
-          "piecewise/fp8 + auto TE/VAE for bare DiTs + 'krea2' UI preset.")
+
+def _native_krea2_forge():
+    """True on Forge Neo builds that ship Krea 2 natively (backend/nn/krea.py + the 'krea'
+    PresetArch enum member). On those builds this extension must NOT register its own arch
+    or preset: the native config uses the same cls_name 'SingleStreamDiT' (our loader patch
+    would hijack the native build), possible_models is an immutable tuple (our append
+    crashed mid-registration, leaving a broken half-patched state), and PresetArch is an
+    Enum (our injected 'krea2' string choice breaks PresetArch[name] lookups)."""
+    try:
+        import backend.loader as _l
+        return any(getattr(M, "__name__", "") == "Krea2" for M in getattr(_l, "possible_models", ()))
+    except Exception:
+        return False
 
 
+def _hook_native_detail_boost():
+    """Port Detail Boost to the NATIVE Krea2: wrap SingleStreamDiT._unpack_context (same hook
+    point as our own dit.py) so enhance.maybe_detail_boost sees the (B, seq, 12, 2560) taps.
+    maybe_detail_boost is a strict no-op when disabled or on any shape mismatch."""
+    from backend.nn.krea import SingleStreamDiT as _NativeDiT
+    from krea2 import enhance as _enh
+    if getattr(_NativeDiT._unpack_context, "_krea2_boost", False):
+        return
+    _orig_unpack = _NativeDiT._unpack_context
+
+    def _boosted_unpack(self, context):
+        return _enh.maybe_detail_boost(_orig_unpack(self, context))
+
+    _boosted_unpack._krea2_boost = True
+    _NativeDiT._unpack_context = _boosted_unpack
+
+
+NATIVE_KREA2 = _native_krea2_forge()
+
+if NATIVE_KREA2:
+    print("[krea2] Native Krea 2 Forge detected -> using Forge's built-in arch + 'krea' preset. "
+          "Extension provides: model downloader tab, auto TE/VAE attach for bare DiTs, Detail Boost.")
+    try:
+        _hook_native_detail_boost()
+    except Exception:
+        print("[krea2] native Detail Boost hook skipped:\n" + traceback.format_exc())
+else:
+    try:
+        _register()
+    except Exception:
+        print("[krea2] arch registration FAILED (Forge boot unaffected):\n" + traceback.format_exc())
+
+    # Register the UI preset INDEPENDENTLY of the arch registration above — it's a pure UI convenience
+    # and should show in the dropdown even if the arch step hit a version-specific snag. Idempotent.
+    try:
+        _register_preset()
+    except Exception:
+        print("[krea2] preset registration skipped:\n" + traceback.format_exc())
+
+# Auto TE/VAE attach for bare DiTs — BOTH Forge generations (fixes 'You do not have Qwen3
+# state dict!' on fresh installs where the user picks a bare DiT without selecting modules).
 try:
-    _register()
+    _register_auto_pieces()
 except Exception:
-    print("[krea2] arch registration FAILED (Forge boot unaffected):\n" + traceback.format_exc())
-
-# Register the UI preset INDEPENDENTLY of the arch registration above — it's a pure UI convenience
-# and should show in the dropdown even if the arch step hit a version-specific snag. Idempotent.
-try:
-    _register_preset()
-except Exception:
-    print("[krea2] preset registration skipped:\n" + traceback.format_exc())
+    print("[krea2] auto TE/VAE attach skipped:\n" + traceback.format_exc())

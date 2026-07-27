@@ -42,6 +42,18 @@ COMPONENTS = {
 }
 _EXTS = (".safetensors", ".sft", ".gguf")
 
+
+def _native_krea2():
+    """Newer Forge Neo ships Krea 2 natively; its UI preset is named 'krea' (ours is 'krea2')."""
+    try:
+        import backend.loader as _l
+        return any(getattr(M, "__name__", "") == "Krea2" for M in getattr(_l, "possible_models", ()))
+    except Exception:
+        return False
+
+
+PRESET_NAME = "krea" if _native_krea2() else "krea2"
+
 # ── Featured checkpoint: "Muse by Stable Yogi" — Krea 2 v1.5 Turbo (photoreal) ──
 # A bare Krea 2 DiT (turbo, 8-step); it plugs into the SAME base Krea 2 TE + VAE the
 # downloader already fetches. Civitai serves these anonymously (307 -> signed R2 CDN,
@@ -182,7 +194,7 @@ def _status_md():
                 ready_req = False
         rows.append(f"| {c['label']} | `{target}` | {mark} |")
     ready = ready_req and _any_dit()
-    banner = ("### ✅ Krea 2 is ready — pick UI Preset **krea2**, choose a Krea 2 checkpoint, generate."
+    banner = (f"### ✅ Krea 2 is ready — pick UI Preset **{PRESET_NAME}**, choose a Krea 2 checkpoint, generate."
               if ready else
               "### ⚠️ Setup incomplete — download the ❌ items below (you need at least one DiT + the TE + the VAE).")
     return banner + "\n\n" + "\n".join(rows)
@@ -346,7 +358,7 @@ def _build_tab():
         gr.Markdown(
             "### How to use\n"
             "1. Click **⭐ Download Muse** (recommended) — or the base set. Precision **fp8** = less VRAM, **bf16** = max fidelity (applies to the TE + VAE).\n"
-            "2. In txt2img, set **UI Preset → krea2** (auto-applies Euler / Simple / 8 steps / CFG 1 **and auto-selects the TE + VAE**).\n"
+            f"2. In txt2img, set **UI Preset → {PRESET_NAME}** (auto-applies the right sampler/steps/CFG; the TE + VAE are auto-attached).\n"
             "3. Pick a **Krea 2 checkpoint** (Muse / Turbo → 8 steps, CFG 1; RAW → 28 steps, CFG 4.5).\n"
             "4. Use **natural-language prompts** (Qwen3-VL dislikes JSON). Generate.\n\n"
             "Files download into Forge's standard folders, so no command-line flags are needed. "

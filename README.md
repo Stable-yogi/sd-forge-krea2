@@ -36,7 +36,9 @@ Two variants: **RAW** (base, best quality) and **Turbo** (8-step distilled, fast
   (by [stableyogi.com](https://stableyogi.com)).*
 
 ## ✅ Requirements
-- **Forge Neo** (Haoming02/sd-webui-forge-classic, `neo` branch). Tested on `neo-2.23`.
+- **Forge Neo** (Haoming02/sd-webui-forge-classic, `neo` branch) — **both generations supported:**
+  - **Newer builds with native Krea 2** (they have a built-in `krea` preset): the extension auto-detects this and uses Forge's native engine — it adds the downloader tab, auto TE/VAE attach, and Detail Boost on top. Use UI Preset **`krea`**.
+  - **Older builds (e.g. `neo-2.23`) without native Krea 2**: the extension registers the whole architecture itself. Use UI Preset **`krea2`**.
 - An NVIDIA GPU with enough VRAM (fp8 set ≈ 16–20 GB; bf16 set ≈ 24 GB+).
 - No extra Python packages — uses Forge's existing dependencies.
 
