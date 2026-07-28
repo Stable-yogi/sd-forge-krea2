@@ -39,6 +39,13 @@ COMPONENTS = {
                 bf16="vae/qwen_image_vae.safetensors",
                 fp8="vae/qwen_image_vae.safetensors",
                 dest="vae", kw=("qwen_image_vae",)),
+    # Optional ALTERNATIVE VAE: the Wan 2.1 VAE also works with Krea 2 and in some cases gives
+    # better results. Lives in a different HF repo, hence the absolute `url` (overrides REPO+rel).
+    "vae_wan": dict(label="Wan 2.1 VAE (optional — alt to the Qwen VAE)",
+                    bf16="wan_2.1_vae.safetensors",
+                    fp8="wan_2.1_vae.safetensors",
+                    url="https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+                    dest="vae", kw=("wan_2.1_vae", "wan21_vae", "wan_vae")),
 }
 _EXTS = (".safetensors", ".sft", ".gguf")
 
@@ -184,10 +191,13 @@ def _status_md():
     ready_req = True
     for key, c in COMPONENTS.items():
         target, _ = _dest_dirs(c["dest"])
-        # DiT rows are filename-only (fingerprint can't tell turbo/raw/muse apart); TE/VAE keep content detection.
-        hit = _present(c["kw"], c["dest"], content=(c["dest"] != "ckpt"))
+        # DiT rows are filename-only (fingerprint can't tell turbo/raw/muse apart); the Wan-VAE row
+        # too (the generic VAE fingerprint would claim the Qwen VAE as "wan"). TE/qwen-VAE keep content.
+        hit = _present(c["kw"], c["dest"], content=(c["dest"] != "ckpt" and key != "vae_wan"))
         if hit:
             mark = f"✅ `{os.path.basename(hit)}`"
+        elif "optional" in c["label"]:
+            mark = "— optional, not downloaded"
         else:
             mark = "❌ missing"
             if "REQUIRED" in c["label"]:
@@ -277,12 +287,12 @@ def _do(keys, precision, progress=gr.Progress()):
         rel = c["fp8"] if precision == "fp8 (smaller / faster)" else c["bf16"]
         target_dir, _ = _dest_dirs(c["dest"])
         dest = os.path.join(target_dir, os.path.basename(rel))
-        if _present(c["kw"], c["dest"], content=(c["dest"] != "ckpt")):
+        if _present(c["kw"], c["dest"], content=(c["dest"] != "ckpt" and key != "vae_wan")):
             log.append(f"⏭️  {c['label']} — already present, skipped")
             continue
         try:
             progress(0.0, desc=f"Starting {os.path.basename(rel)} …")
-            _download(REPO + rel, dest, progress)
+            _download(c.get("url") or (REPO + rel), dest, progress)  # `url` = component from another repo
             log.append(f"✅ {c['label']} → {dest}")
         except Exception as e:
             log.append(f"❌ {c['label']} FAILED: {e}")
@@ -354,6 +364,12 @@ def _build_tab():
             get_raw = gr.Button("⬇️ RAW DiT")
             get_te = gr.Button("⬇️ Text Encoder")
             get_vae = gr.Button("⬇️ VAE")
+            get_wan_vae = gr.Button("⬇️ Wan 2.1 VAE (alt)")
+        gr.Markdown(
+            "💡 **Tip:** the **Wan 2.1 VAE** also works with Krea 2 — and in some cases gives "
+            "**better results**, so you can try it. Download it, then pick it in the VAE dropdown "
+            "instead of the Qwen VAE."
+        )
         logbox = gr.Textbox(label="Download log", lines=8, interactive=False)
         gr.Markdown(
             "### How to use\n"
@@ -380,6 +396,9 @@ def _build_tab():
         def dl_vae(precision, progress=gr.Progress()):
             return _do(["vae"], precision, progress)
 
+        def dl_wan_vae(precision, progress=gr.Progress()):
+            return _do(["vae_wan"], precision, progress)
+
         refresh.click(lambda: _status_md(), outputs=[status])
         get_muse.click(_do_muse, inputs=[muse_variant, precision], outputs=[status, logbox])
         get_all.click(dl_all, inputs=[precision], outputs=[status, logbox])
@@ -387,6 +406,7 @@ def _build_tab():
         get_raw.click(dl_raw, inputs=[precision], outputs=[status, logbox])
         get_te.click(dl_te, inputs=[precision], outputs=[status, logbox])
         get_vae.click(dl_vae, inputs=[precision], outputs=[status, logbox])
+        get_wan_vae.click(dl_wan_vae, inputs=[precision], outputs=[status, logbox])
     return [(ui, "Krea 2", "krea2_setup_tab")]
 
 

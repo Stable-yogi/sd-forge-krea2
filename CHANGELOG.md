@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.3.2 — 2026-07-29
+- **New: one-click Wan 2.1 VAE download** — the Krea 2 tab has a new **"⬇️ Wan 2.1 VAE (alt)"** button (from Comfy-Org/Wan_2.1_ComfyUI_repackaged). The Wan 2.1 VAE **also works with Krea 2 and in some cases gives better results** — download it and pick it in the VAE dropdown instead of the Qwen VAE to try. Shown as an optional row in the status table; setup readiness still only requires the Qwen VAE.
+
 ## v1.3.1 — 2026-07-29 (LoRA × quantized-checkpoint fixes — GGUF crash, INT8 "no effect", fp8-scaled noise)
 - **Fixed: GGUF checkpoints crashed when used with a LoRA** — `RuntimeError: Creating a Parameter from an instance of type ParameterGGUF requires that detach() returns an instance of the same type...`. Two causes, both fixed:
   - Checkpoints loaded via the **API or a preset** missed Forge's "GGUF requires fp16 LoRA" override (it only fires in the UI path), so the LoRA was **baked into the GGUF weights**. The extension now forces **on-the-fly LoRA** at the true decision point (`add_patches` on a model that actually has GGUF weights) — immune to load-path and options-state differences.

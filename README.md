@@ -62,6 +62,7 @@ All files are in the public HF repo **[Comfy-Org/Krea-2](https://huggingface.co/
 | `diffusion_models/krea2_raw_fp8_scaled.safetensors` (or `_bf16`) | `models/Stable-diffusion/` |
 | `text_encoders/qwen3vl_4b_fp8_scaled.safetensors` (or `_bf16`) | `models/text_encoder/` |
 | `vae/qwen_image_vae.safetensors` | `models/VAE/` |
+| *(optional)* `wan_2.1_vae.safetensors` from [Comfy-Org/Wan_2.1_ComfyUI_repackaged](https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged) — also works with Krea 2, in some cases gives better results | `models/VAE/` |
 
 ## 🚀 Usage
 1. In **txt2img**, set **UI Preset → `krea2`** (applies Euler / Simple / 8 steps / CFG 1 and auto-selects the TE + VAE).
