@@ -285,23 +285,38 @@ def _register():
         params = L.utils.calculate_parameters(state_dict)
         sdtype = L.utils.weight_dtype(state_dict)          # a torch dtype, or the string "gguf"/"nf4"/"fp4"
 
-        # comfy_quant MIXED-PRECISION checkpoints (NVFP4 / mxfp8 / per-layer mixed). These carry a
-        # per-tensor `.weight_scale_2` that INT8-ConvRot does NOT — but they ALSO carry `.weight_scale`,
-        # so this MUST be tested BEFORE the int8 branch, or an NVFP4 model is misrouted to int8 ops and
-        # dies at the first un-quantized layer with
-        #   "RuntimeError: self and mat2 must have the same dtype, but got Float and BFloat16".
-        # Forge already knows how to build the right ops from the comfy_quant descriptors, so instead of
-        # hand-picking a class we ask it for the same MixedPrecisionOps its native loader would use.
+        # comfy_quant MIXED-PRECISION checkpoints (NVFP4 / fp8-SCALED / mxfp8 / per-layer mixed).
+        # Forge's loader regenerates per-layer .comfy_quant descriptors from a file's
+        # `_quantization_metadata` BEFORE we get the state_dict (loader.py convert_quantization),
+        # so detect_quantization is the authoritative test — run it unconditionally. This is what
+        # routes Comfy-Org's krea2_*_fp8_scaled files correctly: their .weight_scale tensors are
+        # REAL scales; plain fp8 ops ignore them (pure-noise images) and int8 ops mis-cast them
+        # ("mat1 and mat2 must have the same dtype, but got BFloat16 and Float").
         _quant_cfg = None
-        if any(k.endswith(".weight_scale_2") for k in state_dict):
+        try:
+            from backend.state_dict import detect_quantization
+            _quant_cfg = detect_quantization(state_dict, is_unet=True)
+        except Exception:
+            _quant_cfg = None
+
+        _has_int8_weights = any(getattr(v, "dtype", None) == torch.int8 for v in state_dict.values())
+        # EXCEPTION: INT8-ConvRot files also carry comfy_quant descriptors, but on Forge builds
+        # whose mixed registry lacks 'int8_tensorwise' the mixed ops would KeyError — keep those
+        # on our dedicated int8 ops there (newer Forge loads them natively and never reaches here).
+        if _quant_cfg is not None and _has_int8_weights:
             try:
-                from backend.state_dict import detect_quantization
-                _quant_cfg = detect_quantization(state_dict, is_unet=True)
+                from backend.quant_ops import QUANT_ALGOS as _QA
+                if "int8_tensorwise" not in _QA:
+                    _quant_cfg = None
             except Exception:
                 _quant_cfg = None
 
         is_mixed = _quant_cfg is not None
-        is_int8_convrot = (not is_mixed) and any(k.endswith(".weight_scale") for k in state_dict)
+        # INT8-ConvRot = .weight_scale keys AND genuinely int8-stored weights (the dtype check
+        # keeps fp8-scaled files out of the int8 branch).
+        is_int8_convrot = ((not is_mixed)
+                           and _has_int8_weights
+                           and any(k.endswith(".weight_scale") for k in state_dict))
         is_gguf = (sdtype == "gguf")
 
         if is_mixed:
@@ -371,6 +386,17 @@ def _register():
                 with L.using_forge_operations(**to_args, manual_cast_enabled=need_cast):
                     model = SingleStreamDiT(**unet_config, operations=_dit_ops).to(**to_args)
         L.load_state_dict(model, state_dict)
+        if is_int8_convrot:
+            # using_forge_operations recorded ops="ForgeOperations" (we passed our own class
+            # explicitly). UnetPatcher.from_model reads dynamic_args.ops to decide the patcher:
+            # only "...Int8" gets INT8ModelPatcher, whose dynamic-LoRA path is the ONLY correct
+            # LoRA route for int8 weights (a normal baked merge adds tiny fp deltas into int8
+            # storage where they round to zero — 'LoRA loads but has no effect').
+            try:
+                import backend.args as _bargs
+                _bargs.dynamic_args.ops = "ForgeOperationsInt8"
+            except Exception:
+                pass
         model.config = unet_config
         model.storage_dtype = storage_dtype
         model.computation_dtype = comp_dtype
@@ -494,6 +520,73 @@ def _register_auto_pieces():
         loader.forge_loader = _auto_pieces_forge_loader
 
 
+def _register_lora_quant_fixes():
+    """LoRA x quantized-checkpoint hardening, BOTH Forge generations.
+
+    backend.utils.set_attr wraps every value in torch.nn.Parameter(value). When the LoRA
+    unpatch path restores a backed-up QUANTIZED weight that is already a Parameter subclass
+    (ParameterGGUF), torch >= 2.9's strict subclass check raises:
+      'Creating a Parameter from an instance of type ParameterGGUF requires that detach()
+       returns an instance of the same type'
+    (seen from patcher/base.py unpatch_model -> utils.set_attr(bk.weight) during sampling's
+    partially_load/detach memory juggling). If the value is already a Parameter — which is
+    exactly what set_attr exists to guarantee — set it raw and keep its subclass intact."""
+    import torch as _torch
+    import backend.utils as _u
+
+    if getattr(_u.set_attr, "_krea2_param_safe", False) is False:
+        _orig_set_attr = _u.set_attr
+
+        def _param_safe_set_attr(obj, attr, value):
+            if isinstance(value, _torch.nn.Parameter):
+                return _u.set_attr_raw(obj, attr, value)
+            return _orig_set_attr(obj, attr, value)
+
+        _param_safe_set_attr._krea2_param_safe = True
+        _u.set_attr = _param_safe_set_attr
+
+    # (2) A LoRA must NEVER be baked into GGUF weights — merging needs a dequantize that is
+    # only valid at forward time ('GGUF Tensor is not baked!' / corrupted weights otherwise).
+    # Forge core forces on-the-fly LoRA for gguf, but only in the UI model_change path, and
+    # older builds also force it back OFF whenever dynamic_args.ops looks Mixed/FP8 (which a
+    # mixed-precision TEXT ENCODER triggers even though the UNET is gguf). Enforce it at the
+    # true decision point instead: add_patches() on a model that actually has GGUF weights.
+    import backend.patcher.base as _pb
+
+    if getattr(_pb.ModelPatcher.add_patches, "_krea2_gguf_online", False) is False:
+        _orig_add_patches = _pb.ModelPatcher.add_patches
+
+        def _gguf_online_add_patches(self, patches, strength_patch=1.0, strength_model=1.0, *,
+                                     filename=None, online_mode=None):
+            if not online_mode:
+                quant_kind = getattr(self, "_krea2_quant_kind", None)
+                if quant_kind is None:
+                    quant_kind = ""
+                    try:
+                        for p in self.model.parameters():
+                            if type(p).__name__ == "ParameterGGUF":
+                                quant_kind = "GGUF"
+                                break
+                            if p.dtype == _torch.int8:
+                                quant_kind = "INT8"
+                                break
+                    except Exception:
+                        quant_kind = ""
+                    self._krea2_quant_kind = quant_kind
+                if quant_kind:
+                    # GGUF: baking corrupts/crashes. INT8: baked fp deltas round to zero inside
+                    # int8 storage ('LoRA loads but has no effect') — the INT8ModelPatcher's
+                    # dynamic path consumes ONLINE patches and applies them post-matmul instead.
+                    online_mode = True
+                    print(f"[krea2] {quant_kind} weights -> forcing on-the-fly LoRA "
+                          f"({os.path.basename(str(filename)) if filename else 'lora'})")
+            return _orig_add_patches(self, patches, strength_patch, strength_model,
+                                     filename=filename, online_mode=online_mode)
+
+        _gguf_online_add_patches._krea2_gguf_online = True
+        _pb.ModelPatcher.add_patches = _gguf_online_add_patches
+
+
 def _native_krea2_forge():
     """True on Forge Neo builds that ship Krea 2 natively (backend/nn/krea.py + the 'krea'
     PresetArch enum member). On those builds this extension must NOT register its own arch
@@ -553,3 +646,10 @@ try:
     _register_auto_pieces()
 except Exception:
     print("[krea2] auto TE/VAE attach skipped:\n" + traceback.format_exc())
+
+# LoRA x quantized-checkpoint hardening — BOTH Forge generations (fixes the GGUF + LoRA
+# 'Creating a Parameter from an instance of type ParameterGGUF...' crash).
+try:
+    _register_lora_quant_fixes()
+except Exception:
+    print("[krea2] LoRA/quant hardening skipped:\n" + traceback.format_exc())
