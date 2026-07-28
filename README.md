@@ -89,3 +89,10 @@ Questions, bugs, or want to show off your results? **Bring your issues to the St
 - Model weights: **Krea 2 Community License** (download from Comfy-Org/Krea-2; not redistributed here).
 - **Detail Boost** technique adapted from [huwhitememes/comfyui-krea2-conditioning](https://github.com/huwhitememes/comfyui-krea2-conditioning) (**Apache-2.0**), a fork of nova452/ComfyUI-ConditioningKrea2Rebalance.
 - Integration & packaging by **[stableyogi.com](https://stableyogi.com)**.
+
+---
+
+### More free tools by Stable Yogi
+
+Small, free, open tools for local AI art — Forge / Forge Neo, AUTOMATIC1111, and ComfyUI.
+Browse them all at **[github.com/Stable-yogi](https://github.com/Stable-yogi)** · more at **[stableyogi.com](https://stableyogi.com)**.
