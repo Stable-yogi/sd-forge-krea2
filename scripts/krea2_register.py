@@ -605,17 +605,38 @@ def _hook_native_detail_boost():
     """Port Detail Boost to the NATIVE Krea2: wrap SingleStreamDiT._unpack_context (same hook
     point as our own dit.py) so enhance.maybe_detail_boost sees the (B, seq, 12, 2560) taps.
     maybe_detail_boost is a strict no-op when disabled or on any shape mismatch."""
-    from backend.nn.krea import SingleStreamDiT as _NativeDiT
+    import backend.nn.krea as _k
     from krea2 import enhance as _enh
-    if getattr(_NativeDiT._unpack_context, "_krea2_boost", False):
+
+    _NativeDiT = _k.SingleStreamDiT
+
+    if hasattr(_NativeDiT, "_unpack_context"):
+        # Forge <= 2.27: the DiT unpacks the 12 taps itself -> boost that output.
+        if getattr(_NativeDiT._unpack_context, "_krea2_boost", False):
+            return
+        _orig_unpack = _NativeDiT._unpack_context
+
+        def _boosted_unpack(self, context):
+            return _enh.maybe_detail_boost(_orig_unpack(self, context))
+
+        _boosted_unpack._krea2_boost = True
+        _NativeDiT._unpack_context = _boosted_unpack
         return
-    _orig_unpack = _NativeDiT._unpack_context
 
-    def _boosted_unpack(self, context):
-        return _enh.maybe_detail_boost(_orig_unpack(self, context))
+    # Forge >= 2.28 REMOVED SingleStreamDiT._unpack_context — the context now arrives already
+    # unpacked and goes straight into txtfusion, whose input IS the same (B, seq, 12, 2560)
+    # tensor. Boosting there is identical in meaning. (Hooking the old name here raised
+    # AttributeError, which silently disabled Detail Boost on 2.28.)
+    _TFT = _k.TextFusionTransformer
+    if getattr(_TFT.forward, "_krea2_boost", False):
+        return
+    _orig_forward = _TFT.forward
 
-    _boosted_unpack._krea2_boost = True
-    _NativeDiT._unpack_context = _boosted_unpack
+    def _boosted_forward(self, x, *args, **kwargs):
+        return _orig_forward(self, _enh.maybe_detail_boost(x), *args, **kwargs)
+
+    _boosted_forward._krea2_boost = True
+    _TFT.forward = _boosted_forward
 
 
 NATIVE_KREA2 = _native_krea2_forge()

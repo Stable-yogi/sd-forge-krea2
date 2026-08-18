@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.3.3 — 2026-08-19 (Forge Neo 2.28 compatibility — Detail Boost was silently dead)
+- **Fixed: Detail Boost did nothing on Forge Neo 2.28**, and startup printed `[krea2] native Detail Boost hook skipped ... AttributeError: type object 'SingleStreamDiT' has no attribute '_unpack_context'`. Forge 2.28 removed `_unpack_context` from the native Krea 2 DiT — the 12 Qwen3-VL taps now arrive already unpacked and go straight into the text-fusion block — so the hook the extension had attached since v1.3.0 no longer existed. The boost now attaches to the **text-fusion input** on 2.28+ (the exact same `(B, seq, 12, 2560)` tensor) and keeps the old hook on Forge <= 2.27. Verified on a fresh 2.28 install: Detail Boost off vs on now renders **different pixels** — before the fix they were identical.
+- The same removal also killed the companion **Krea 2 Enhancement Suite** (Prompt-Adherence + Detail Boost PRO); that is fixed in its v1.0.1 — **update both**.
+
 ## v1.3.2 — 2026-07-29
 - **New: one-click Wan 2.1 VAE download** — the Krea 2 tab has a new **"⬇️ Wan 2.1 VAE (alt)"** button (from Comfy-Org/Wan_2.1_ComfyUI_repackaged). The Wan 2.1 VAE **also works with Krea 2 and in some cases gives better results** — download it and pick it in the VAE dropdown instead of the Qwen VAE to try. Shown as an optional row in the status table; setup readiness still only requires the Qwen VAE.
 
